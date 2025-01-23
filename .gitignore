@@ -1,0 +1,5 @@
+*/.vs
+*/packages
+Task3-Scenario2-SingleActiveCasePlugin/Task3-Scenario2-SingleActiveCasePlugin/bin
+Task3-Scenario2-SingleActiveCasePlugin/Task3-Scenario2-SingleActiveCasePlugin/obj
+*.snk
