@@ -1,34 +1,33 @@
 /**
  * Initialize the form by hiding controls and setting mandatory fields.
  * Should be called on form OnLoad.
- * @param {Xrm.ExecutionContext} executionContext 
+ * @param {Xrm.ExecutionContext} executionContext
  */
 function initialiseForm(executionContext) {
     hideQuickViewControlsIfDataNotPresent(executionContext);
     setMandatoryFields(executionContext);
 }
 
+/*
+*       functions for Control visibility and mandatory fields
+*/
+
 /**
  * Hide Quick View controls if data is not present.
- * @param {Xrm.ExecutionContext} executionContext 
+ * @param {Xrm.ExecutionContext} executionContext
  */
 function hideQuickViewControlsIfDataNotPresent(executionContext) {
     try {
         const formContext = executionContext.getFormContext();
         const quickViewControl = getQuickViewControl(formContext, "PrimaryContactQV");
 
-        if (!quickViewControl || !quickViewControl.getAttribute()) {
+        if (!quickViewControl?.getAttribute()) {
             console.warn("Quick View Control 'PrimaryContactQV' not found or has no attributes.");
             return;
         }
 
-        // Check if 'emailaddress1' has data
-        const emailValue = getAttributeValue(formContext, "emailaddress1");
-        toggleControlVisibility(formContext, "emailaddress1", !!emailValue);
-
-        // Check if 'mobilephone' has data
-        const phoneValue = getAttributeValue(formContext, "mobilephone");
-        toggleControlVisibility(formContext, "mobilephone", !!phoneValue);
+        toggleControlVisibility(quickViewControl, "emailaddress1", !!getAttributeValue(quickViewControl, "emailaddress1"));
+        toggleControlVisibility(quickViewControl, "mobilephone", !!getAttributeValue(quickViewControl, "mobilephone"));
     } catch (error) {
         handleError("hideQuickViewControlsIfDataNotPresent", error);
     }
@@ -37,38 +36,129 @@ function hideQuickViewControlsIfDataNotPresent(executionContext) {
 /**
  * Set mandatory fields based on Customer type.
  * Should be called on Customer field OnChange.
- * @param {Xrm.ExecutionContext} executionContext 
+ * @param {Xrm.ExecutionContext} executionContext
  */
 function setMandatoryFields(executionContext) {
     try {
         const formContext = executionContext.getFormContext();
         const customerValue = getAttributeValue(formContext, "customerid");
 
-        if (!customerValue || customerValue.length === 0) {
+        if (customerValue?.length === 0) {
             resetFieldRequirements(formContext);
             enableControl(formContext, "primarycontactid");
             return;
         }
 
-        const customerType = customerValue[0].entityType;
-
-        if (customerType === "account") {
-            setFieldRequirement(formContext, "primarycontactid", "required");
-            enableControl(formContext, "primarycontactid", true);
-        } else if (customerType === "contact") {
-            setFieldRequirement(formContext, "primarycontactid", "none");
-            disableControl(formContext, "primarycontactid");
-        }
+        handleCustomerType(formContext, customerValue[0].entityType);
     } catch (error) {
         handleError("setMandatoryFields", error);
     }
 }
 
+
+/*
+*       functions to populate primary contact
+*/
+
+/**
+ * Populate the primary contact based on the selected Customer.
+ * Should be called on Customer field OnChange.
+ * @param {Xrm.ExecutionContext} executionContext
+ */
+async function populateContact(executionContext) {
+    try {
+        const formContext = executionContext.getFormContext();
+
+        if (!isValidAccountCustomer(formContext)) {
+            clearPrimaryContact(formContext);
+            return;
+        }
+        
+        // Retrieve the primary contact for the selected Account's id
+        const customerValue = getAttributeValue(formContext, "customerid");
+        const primaryContact = await getPrimaryContact(formatGuid(customerValue[0].id));
+
+        if (!primaryContact) {
+            clearPrimaryContact(formContext);
+            return;
+        }
+
+        setPrimaryContact(formContext, primaryContact);
+    } catch (error) {
+        handleError("populateContact", error);
+    }
+}
+
+/**
+ * Retrieve the primary contact for the specified Account using OData.
+ * @param {string} accountId Account ID in GUID format without braces
+ * @returns {Promise<object>} Primary contact details
+ */
+async function getPrimaryContact(accountId) {
+    try {
+        // Construct the OData query to retrieve the primarycontactid with contact details
+        const query = `?$select=primarycontactid&$expand=primarycontactid($select=contactid,fullname)`;
+        const response = await Xrm.WebApi.retrieveRecord("account", accountId, query);
+
+        if (response.primarycontactid) {
+            return response.primarycontactid;
+        }
+
+        return null;
+    } catch (error) {
+        handleError("getPrimaryContact", error);
+    }
+}
+
+/**
+ * Set the primary contact on the form.
+ * @param {Xrm.FormContext} formContext
+ * @param {object} primaryContact
+ */
+function setPrimaryContact(formContext, primaryContact) {
+    formContext.getAttribute("primarycontactid").setValue([
+        {
+            id: primaryContact.contactid,
+            entityType: "contact",
+            name: primaryContact.fullname,
+        },
+    ]);
+}
+
+
+/**
+ * Clear the primarycontactid field on the form.
+ * @param {Xrm.FormContext} formContext
+ */
+function clearPrimaryContact(formContext) {
+    formContext.getAttribute("primarycontactid").setValue(null);
+}
+
+/*
+*       utility functions
+*/
+
+
+/**
+ * Handle customer type to set field requirements.
+ * @param {Xrm.FormContext} formContext
+ * @param {string} customerType
+ */
+function handleCustomerType(formContext, customerType) {
+    if (customerType === "account") {
+        setFieldRequirement(formContext, "primarycontactid", "required");
+        enableControl(formContext, "primarycontactid", true);
+    } else if (customerType === "contact") {
+        setFieldRequirement(formContext, "primarycontactid", "none");
+        disableControl(formContext, "primarycontactid");
+    }
+}
+
 /**
  * Toggle the visibility of a control based on the provided value.
- * @param {Xrm.FormContext} formContext 
- * @param {string} controlName 
- * @param {boolean} isVisible 
+ * @param {Xrm.FormContext} formContext
+ * @param {string} controlName
+ * @param {boolean} isVisible
  */
 function toggleControlVisibility(formContext, controlName, isVisible) {
     const control = formContext.getControl(controlName);
@@ -79,7 +169,7 @@ function toggleControlVisibility(formContext, controlName, isVisible) {
 
 /**
  * Reset field requirements when Customer is cleared.
- * @param {Xrm.FormContext} formContext 
+ * @param {Xrm.FormContext} formContext
  */
 function resetFieldRequirements(formContext) {
     setFieldRequirement(formContext, "primarycontactid", "none");
@@ -89,8 +179,8 @@ function resetFieldRequirements(formContext) {
 
 /**
  * Get a Quick View Control by name.
- * @param {Xrm.FormContext} formContext 
- * @param {string} controlName 
+ * @param {Xrm.FormContext} formContext
+ * @param {string} controlName
  * @returns {Xrm.Controls.QuickViewControl | null}
  */
 function getQuickViewControl(formContext, controlName) {
@@ -99,8 +189,8 @@ function getQuickViewControl(formContext, controlName) {
 
 /**
  * Get the value of an attribute.
- * @param {Xrm.FormContext} formContext 
- * @param {string} attributeName 
+ * @param {Xrm.FormContext} formContext
+ * @param {string} attributeName
  * @returns {*} The value of the attribute.
  */
 function getAttributeValue(formContext, attributeName) {
@@ -110,12 +200,12 @@ function getAttributeValue(formContext, attributeName) {
 
 /**
  * Set the requirement level of a field.
- * @param {Xrm.FormContext} formContext 
- * @param {string} attributeName 
+ * @param {Xrm.FormContext} formContext
+ * @param {string} attributeName
  * @param {string} requirementLevel ('none', 'required', 'recommended')
  */
 function setFieldRequirement(formContext, attributeName, requirementLevel) {
-    const attribute = formContext.getAttribute(attributeName);
+    const attribute = getAttributeValue(formContext, attributeName);
     if (attribute) {
         attribute.setRequiredLevel(requirementLevel);
     }
@@ -123,8 +213,8 @@ function setFieldRequirement(formContext, attributeName, requirementLevel) {
 
 /**
  * Disable a control.
- * @param {Xrm.FormContext} formContext 
- * @param {string} controlName 
+ * @param {Xrm.FormContext} formContext
+ * @param {string} controlName
  */
 function disableControl(formContext, controlName) {
     const control = formContext.getControl(controlName);
@@ -135,9 +225,9 @@ function disableControl(formContext, controlName) {
 
 /**
  * Enable a control.
- * @param {Xrm.FormContext} formContext 
- * @param {string} controlName 
- * @param {boolean} [enable=true] 
+ * @param {Xrm.FormContext} formContext
+ * @param {string} controlName
+ * @param {boolean} [enable=true]
  */
 function enableControl(formContext, controlName, enable = true) {
     const control = formContext.getControl(controlName);
@@ -147,9 +237,29 @@ function enableControl(formContext, controlName, enable = true) {
 }
 
 /**
+ * Format GUID by removing braces.
+ * @param {string} guid GUID with or without braces
+ * @returns {string} GUID without braces
+ */
+function formatGuid(guid) {
+    return guid.replace("{", "").replace("}", "");
+}
+
+
+/**
+ * Check if the customer is valid and an account.
+ * @param {Xrm.FormContext} formContext
+ * @returns {boolean} True if the customer is valid and an account, false otherwise.
+ */
+function isValidAccountCustomer(formContext) {
+    const customerValue = getAttributeValue(formContext, "customerid");
+    return customerValue && customerValue.length > 0 && customerValue[0].entityType === "account";
+}
+
+/**
  * Handle errors by logging and displaying an alert.
- * @param {string} functionName 
- * @param {Error} error 
+ * @param {string} functionName
+ * @param {Error} error
  */
 function handleError(functionName, error) {
     console.error(`Error in ${functionName}:`, error);
