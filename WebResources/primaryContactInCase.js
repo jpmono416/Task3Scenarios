@@ -4,30 +4,39 @@
  * @param {Xrm.ExecutionContext} executionContext
  */
 function initialiseForm(executionContext) {
-    hideQuickViewControlsIfDataNotPresent(executionContext);
     setMandatoryFields(executionContext);
+    hideQuickViewControlsIfDataNotPresent(executionContext);
 }
 
 /*
-*       functions for Control visibility and mandatory fields
-*/
+ *       functions for Control visibility and mandatory fields
+ */
 
 /**
  * Hide Quick View controls if data is not present.
+ * Should be called on contact change
  * @param {Xrm.ExecutionContext} executionContext
  */
 function hideQuickViewControlsIfDataNotPresent(executionContext) {
     try {
         const formContext = executionContext.getFormContext();
-        const quickViewControl = getQuickViewControl(formContext, "PrimaryContactQV");
+        const quickViewControl = formContext.ui.quickForms.get("PrimaryContactQV") || null;
 
         if (!quickViewControl?.getAttribute()) {
             console.warn("Quick View Control 'PrimaryContactQV' not found or has no attributes.");
             return;
         }
 
-        toggleControlVisibility(quickViewControl, "emailaddress1", !!getAttributeValue(quickViewControl, "emailaddress1"));
-        toggleControlVisibility(quickViewControl, "mobilephone", !!getAttributeValue(quickViewControl, "mobilephone"));
+        toggleControlVisibility(
+            quickViewControl,
+            "emailaddress1",
+            !!getAttributeValue(quickViewControl, "emailaddress1")
+        );
+        toggleControlVisibility(
+            quickViewControl,
+            "mobilephone",
+            !!getAttributeValue(quickViewControl, "mobilephone")
+        );
     } catch (error) {
         handleError("hideQuickViewControlsIfDataNotPresent", error);
     }
@@ -35,7 +44,7 @@ function hideQuickViewControlsIfDataNotPresent(executionContext) {
 
 /**
  * Set mandatory fields based on Customer type.
- * Should be called on Customer field OnChange.
+ * Should be called on customer change.
  * @param {Xrm.ExecutionContext} executionContext
  */
 function setMandatoryFields(executionContext) {
@@ -43,7 +52,7 @@ function setMandatoryFields(executionContext) {
         const formContext = executionContext.getFormContext();
         const customerValue = getAttributeValue(formContext, "customerid");
 
-        if (customerValue?.length === 0) {
+        if (!customerValue?.length) {
             resetFieldRequirements(formContext);
             enableControl(formContext, "primarycontactid");
             return;
@@ -55,14 +64,13 @@ function setMandatoryFields(executionContext) {
     }
 }
 
-
 /*
-*       functions to populate primary contact
-*/
+ *       functions to populate primary contact
+ */
 
 /**
  * Populate the primary contact based on the selected Customer.
- * Should be called on Customer field OnChange.
+ * Should be called on customer change.
  * @param {Xrm.ExecutionContext} executionContext
  */
 async function populateContact(executionContext) {
@@ -73,7 +81,7 @@ async function populateContact(executionContext) {
             clearPrimaryContact(formContext);
             return;
         }
-        
+
         // Retrieve the primary contact for the selected Account's id
         const customerValue = getAttributeValue(formContext, "customerid");
         const primaryContact = await getPrimaryContact(formatGuid(customerValue[0].id));
@@ -125,7 +133,6 @@ function setPrimaryContact(formContext, primaryContact) {
     ]);
 }
 
-
 /**
  * Clear the primarycontactid field on the form.
  * @param {Xrm.FormContext} formContext
@@ -135,9 +142,8 @@ function clearPrimaryContact(formContext) {
 }
 
 /*
-*       utility functions
-*/
-
+ *       utility functions
+ */
 
 /**
  * Handle customer type to set field requirements.
@@ -178,16 +184,6 @@ function resetFieldRequirements(formContext) {
 }
 
 /**
- * Get a Quick View Control by name.
- * @param {Xrm.FormContext} formContext
- * @param {string} controlName
- * @returns {Xrm.Controls.QuickViewControl | null}
- */
-function getQuickViewControl(formContext, controlName) {
-    return formContext.ui.quickForms.get(controlName) || null;
-}
-
-/**
  * Get the value of an attribute.
  * @param {Xrm.FormContext} formContext
  * @param {string} attributeName
@@ -205,7 +201,7 @@ function getAttributeValue(formContext, attributeName) {
  * @param {string} requirementLevel ('none', 'required', 'recommended')
  */
 function setFieldRequirement(formContext, attributeName, requirementLevel) {
-    const attribute = getAttributeValue(formContext, attributeName);
+    const attribute = formContext.getAttribute(attributeName);
     if (attribute) {
         attribute.setRequiredLevel(requirementLevel);
     }
@@ -244,7 +240,6 @@ function enableControl(formContext, controlName, enable = true) {
 function formatGuid(guid) {
     return guid.replace("{", "").replace("}", "");
 }
-
 
 /**
  * Check if the customer is valid and an account.
